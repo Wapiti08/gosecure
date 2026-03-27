@@ -1,5 +1,10 @@
 package scanner
 
+/*
+define shared types/interfaces, like Scanner, Vulnerability, helper functions
+
+*/
+
 import (
 	"context"
 	"fmt"
@@ -13,6 +18,10 @@ type Vulnerability struct {
 	Severity string `json:"severity"` // High, Medium, Low
 	Summary string  `json:"summary"` // vulnerability summary
 	Fixed   []string `json:"fixed"`   // list of fixed versions
+}
+
+type VulnChecker interface {
+	Check(ctx context.Context, module, version string) ([]Vulnerability, error)
 }
 
 // Scanner interface defines the method to scan a project for vulnerabilities
@@ -43,4 +52,8 @@ func CountBySeverity(vulns []Vulnerability) map[string]int {
 		counts[v.Severity]++
 	}
 	return counts
+}
+
+func ScanProject(ctx, root string, scanners []Scanner) ([]Vulnerability, error) {
+
 }
