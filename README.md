@@ -5,9 +5,9 @@ A golang-based high-performance dependency scanning tool
 ## Core Features
 - extreme-speed scanning (compared with govulncheck)
 - golang-based, extensible
+- deep transitive dependency scanning (up to 3 levels), catching vulnerabilities hidden in nested deps (e.g. axios → follow-redirects)
 - visualized dependency graph
 - plugin-support, multi-language support
-
 
 ## Structure
 

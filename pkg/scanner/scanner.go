@@ -76,3 +76,4 @@ func ScanProject(ctx context.Context, root string, scanners []Scanner) ([]Vulner
 
 	return all, nil
 }
+
