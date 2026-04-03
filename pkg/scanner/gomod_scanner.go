@@ -8,6 +8,7 @@ import (
 	"os"
 	"path/filepath"
 
+	"golang.org/x/mod/modfile"
 	"golang.org/x/mod/module"
 )
 
@@ -23,6 +24,9 @@ const (
 type GoModScanner struct {
 	Vulns VulnChecker
 	Layer GoModuleLayer
+
+	// cover indirect
+	IncludeIndirect bool // true = include indirect in go.mod
 }
 
 
@@ -42,10 +46,59 @@ func (s *GoModScanner) Scan(ctx context.Context, root string) ([]Vulnerability, 
 
 }
 
-// three-layer data sources
+// three-layer data sources - one collection module
 func (s *GoModScanner) collectModules(ctx context.Context, root string) ([]module.Version, error) {
+	switch s.Layer {
+	case LayerModfile:
+		return collectFromModfile(root, s.IncludeIndirect)
+	case LayerArtifacts:
+		if p := filepath.Join(root, "vendor", "modules.txt") {
+			return collectFromVendorModulesTxt(p)
+		}
+		return collectFromGoSum(filepath.Join(root, "go.sum"))
+	case LayerGoList:
+		return collectFromGoList(ctx, root)
+	default:
+		return nil, fmt.Errorf("unknown layer: %d", s.Layer)
+	}
+
+}
 
 
+// ----- modfile ------
+func collectFromModfile(root string, IncludeIndirect bool) ([]module.Version, error) {
+	data, err := os.ReadFile(filepath.Join(root, "go.mod"))
+	check(err)
+
+	f, err := modfile.Parse("go.mod", data, nil)
+	check(err)
+
+	out := make([]module.Version, 0, len(f.Require))
+	for _, r := range f.Require {
+		if r == nil {
+			continue
+		}
+		if !IncludeIndirect && r.Indirect {
+			continue
+		}
+		out = append(out, r.Mod)
+
+	}
+	return out, nil
+}
+
+// ----- vendor / go.sum ------
+func collectFromGoSum(path string) ([]module.Version, error) {
+	// parse go.sum and remove repetition
+}
+
+func collectFromVendorModulesTxt(path string) () {
+	// parse modules.txt
+}
+
+// ----- go list ------
+func collectFromGoList(path string) ([]module.Version, error) {
+	// execute command and return the results
 }
 
 
