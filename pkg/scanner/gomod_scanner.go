@@ -6,47 +6,78 @@ contain the concrete implementation of the Scanner interface for go.mod files
 import (
 	"context"
 	"os"
+	"path/filepath"
+
+	"golang.org/x/mod/module"
+)
+
+// define the covered file layers to contain dependencies
+type GoModuleLayer int
+
+const (
+	LayerModfile GoModuleLayer = iota // go.mod 
+	LayerArtifacts          // vendor/module.txt first, otherwise go.sum
+	LayerGolist            // go list -m -json all
 )
 
 type GoModScanner struct {
 	Vulns VulnChecker
+	Layer GoModuleLayer
 }
 
-func check(e error) {
-	if e != nil {
-		panic(e)
-	}
-}
 
 func (s *GoModScanner) Scan(ctx context.Context, root string) ([]Vulnerability, error) {
 	/*
 	parse go.mod, use gorountine, calls Vulns.Check
 	*/
 
-	// concatenate the path
+	var all []Vulnerability
 
-	// read path - steaming/lower memory processing (do not load the whole file)
-	f, err := os.Open(path)
-
-	check(err)
-
-	defer f.Close()
-
-	// split data into lines
-	library_list := data.split('\n')
-
-	// check 
-	for index, lib := range library_list {
-		vul, err := VulnCheck(lib)
+	for _, mod := range mods  {
+		// match cve information
+		vuls, err := VulnChecker(line)
 		check(err)
-
+		all = append(all, vuls...)
 	}
+
+}
+
+// three-layer data sources
+func (s *GoModScanner) collectModules(ctx context.Context, root string) ([]module.Version, error) {
+
+
 }
 
 
 func (s *GoModScanner) Support(root string) bool {
 	// check for go.mod
+	if !hasFile(root, "go.mod") {
+		return false
+	}
+
+	// switch case to check different layerred files
+	switch s.Layer {
+	case LayerModfile:
+		return true
+	case LayerArtifacts:
+		return hasFile(root, "vendor/modules.txt") || hasFile(root, "go.sum")
+	case LayerGolist:
+		// need support to run go
+		return true
+	default:
+		return false
+	}
+}
+
+func hasFile(dir, name string) bool {
+	_, err := os.Stat(filepath.Join(dir, name))
+
+	return !os.IsNotExist(err)
 }
 
 
-
+func check(e error) {
+	if e != nil {
+		panic(e)
+	}
+}

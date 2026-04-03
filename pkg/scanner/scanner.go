@@ -33,6 +33,7 @@ type Scanner interface {
 	Support(path string) bool
 }
 
+
 // ScanResult
 type ScanResult struct {
 	FilePath    string     `json:"file_path"`
@@ -54,6 +55,24 @@ func CountBySeverity(vulns []Vulnerability) map[string]int {
 	return counts
 }
 
-func ScanProject(ctx, root string, scanners []Scanner) ([]Vulnerability, error) {
+func ScanProject(ctx context.Context, root string, scanners []Scanner) ([]Vulnerability, error) {
+	/*
+	the scanner orchestrator for diverse project, accept scanner interface
+	*/
+	var all []Vulnerability
 
+	for _, s := range scanners {
+		if !s.Support(root) {
+			continue
+		}
+
+		vulns, err := s.Scan(ctx, root)
+		if err != nil {
+			return all, err
+		}
+
+		all = append(all, vulns...)
+	}
+
+	return all, nil
 }
