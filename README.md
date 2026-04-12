@@ -29,8 +29,6 @@ A golang-based high-performance dependency scanning tool
 
 - `pkg/graph/`: dependency graph representation and algorithms (depth limits, visualization, shared by scanners and reports).
 
-**Planned for dependency diff & risk (feature line 5)** — add when you implement them, to keep scanning vs. scoring separated:
-
 - `pkg/diff/`: compare two dependency snapshots (e.g. two lockfiles or two resolved graphs); output added/removed/changed packages.
 
 - `pkg/risk/`: pure scoring and policy (package age, popularity proxies, maintainer signals, post-install script flags); consumed by CLI or diff reports.
