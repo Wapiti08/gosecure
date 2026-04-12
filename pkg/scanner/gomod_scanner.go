@@ -4,9 +4,17 @@ package scanner
 contain the concrete implementation of the Scanner interface for go.mod files
 */
 import (
+	"bufio"
+	"bytes"
 	"context"
+	"encoding/json"
+	"errors"
+	"fmt"
+	"io"
 	"os"
+	"os/exec"
 	"path/filepath"
+	"strings"
 
 	"golang.org/x/mod/modfile"
 	"golang.org/x/mod/module"
@@ -18,7 +26,7 @@ type GoModuleLayer int
 const (
 	LayerModfile GoModuleLayer = iota // go.mod 
 	LayerArtifacts          // vendor/module.txt first, otherwise go.sum
-	LayerGolist            // go list -m -json all
+	LayerGoList            // go list -m -json all
 )
 
 type GoModScanner struct {
@@ -31,19 +39,10 @@ type GoModScanner struct {
 
 
 func (s *GoModScanner) Scan(ctx context.Context, root string) ([]Vulnerability, error) {
-	/*
-	parse go.mod, use gorountine, calls Vulns.Check
-	*/
-
-	var all []Vulnerability
-
-	for _, mod := range mods  {
-		// match cve information
-		vuls, err := VulnChecker(line)
-		check(err)
-		all = append(all, vuls...)
-	}
-
+	_ = ctx
+	_ = root
+	// TODO: collectModules + VulnChecker.Check with concurrency
+	return nil, fmt.Errorf("GoModScanner.Scan: not implemented")
 }
 
 // three-layer data sources - one collection module
@@ -52,8 +51,8 @@ func (s *GoModScanner) collectModules(ctx context.Context, root string) ([]modul
 	case LayerModfile:
 		return collectFromModfile(root, s.IncludeIndirect)
 	case LayerArtifacts:
-		if p := filepath.Join(root, "vendor", "modules.txt") {
-			return collectFromVendorModulesTxt(p)
+		if hasFile(root, filepath.Join("vendor", "modules.txt")) {
+			return collectFromVendorModulesTxt(filepath.Join(root, "vendor", "modules.txt"))
 		}
 		return collectFromGoSum(filepath.Join(root, "go.sum"))
 	case LayerGoList:
@@ -89,16 +88,146 @@ func collectFromModfile(root string, IncludeIndirect bool) ([]module.Version, er
 
 // ----- vendor / go.sum ------
 func collectFromGoSum(path string) ([]module.Version, error) {
-	// parse go.sum and remove repetition
+	return parseGoSumFile(path)
 }
 
-func collectFromVendorModulesTxt(path string) () {
-	// parse modules.txt
+func collectFromVendorModulesTxt(path string) ([]module.Version, error)  {
+	// parse modules.txt with modfile
+	return parseGoVendorFile(path)
 }
 
 // ----- go list ------
-func collectFromGoList(path string) ([]module.Version, error) {
-	// execute command and return the results
+
+type goListModuleJSON struct {
+	Path    string `json:"Path"`
+	Version string `json:"Version"`
+}
+
+func collectFromGoList(ctx context.Context, root string) ([]module.Version, error) {
+	cmd := exec.CommandContext(ctx, "go", "list", "-m", "-json", "all")
+	cmd.Dir = root
+	var stderr bytes.Buffer
+	cmd.Stderr = &stderr
+
+	out, err := cmd.Output()
+	if err != nil {
+		return nil, fmt.Errorf("go list -m -json all: %w: %s", err, strings.TrimSpace(stderr.String()))
+	}
+
+	seen := make(map[module.Version]struct{})
+	dec := json.NewDecoder(bytes.NewReader(out))
+	// try to read from steaming continously
+	for {
+		var m goListModuleJSON
+		if err := dec.Decode(&m); err != nil {
+			// EOF means end of file, without more JSON
+			if errors.Is(err, io.EOF) {
+				break
+			}
+			return nil, fmt.Errorf("go list json: %w", err)
+		}
+		if m.Path == "" || m.Version == "" {
+			continue
+		}
+		if err := module.Check(m.Path, m.Version); err != nil {
+			continue
+		}
+		mv := module.Version{Path: m.Path, Version: m.Version}
+		seen[mv] = struct{}{}
+	}
+
+	mods := make([]module.Version, 0, len(seen))
+	for mv := range seen {
+		mods = append(mods, mv)
+	}
+	return mods, nil
+}
+
+
+func parseGoVendorFile(path string) ([]module.Version, error) {
+	f, err := os.Open(path)
+	if err != nil {
+		return nil, err
+	}
+	defer f.Close()
+
+	seen := make(map[module.Version]struct{})
+	scn := bufio.NewScanner(f)
+	lineNum := 0
+	for scn.Scan() {
+		lineNum++
+		line := strings.TrimSpace(scn.Text())
+		if line == "" || strings.HasPrefix(line, "#") {
+			continue
+		}
+
+		fields := strings.Fields(line)
+		if len(fields) < 2 {
+			return nil, fmt.Errorf("vendor/modules.txt:%d: expected module path and version", lineNum)
+		}
+
+		modPath, ver := fields[0], fields[1]
+		if err := module.Check(modPath, ver); err != nil {
+			return nil, fmt.Errorf("vendor/modules.txt:%d: %w", lineNum, err)
+		}
+		seen[module.Version{Path: modPath, Version: ver}] = struct{}{}
+	}
+	if err := scn.Err(); err != nil {
+		return nil, err
+	}
+	out := make([]module.Version, 0, len(seen))
+	for mv := range seen {
+		out = append(out, mv)
+	}
+	return out, nil
+}
+
+
+// parseGoSumFile reads go.sum and returns unique module.Version entries.
+// It merges vX.Y.Z and vX.Y.Z/go.mod lines, skips empty and # comments,
+// and requires an h1: checksum on each data line.
+func parseGoSumFile(path string) ([]module.Version, error) {
+	f, err := os.Open(path)
+	if err != nil {
+		return nil, err
+	}
+	defer f.Close()
+
+	seen := make(map[module.Version]struct{})
+	scn := bufio.NewScanner(f)
+	lineNum := 0
+	for scn.Scan() {
+		lineNum++
+		line := strings.TrimSpace(scn.Text())
+		if line == "" || strings.HasPrefix(line, "#") {
+			continue
+		}
+		fields := strings.Fields(line)
+		if len(fields) < 3 {
+			return nil, fmt.Errorf("go.sum:%d: expected module, version, and hash", lineNum)
+		}
+
+		modPath, ver, hash := fields[0], fields[1], fields[2]
+		if !strings.HasPrefix(hash, "h1:") {
+			return nil, fmt.Errorf("go.sum:%d: hash must start with h1:", lineNum)
+		}
+		ver = strings.TrimSuffix(ver, "/go.mod")
+		if ver == "" {
+			return nil, fmt.Errorf("go.sum:%d: empty version after normalization", lineNum)
+		}
+		if err := module.Check(modPath, ver); err != nil {
+			return nil, fmt.Errorf("go.sum:%d: %w", lineNum, err)
+		}
+		seen[module.Version{Path: modPath, Version: ver}] = struct{}{}
+	}
+	if err := scn.Err(); err != nil {
+		return nil, err
+	}
+	out := make([]module.Version, 0, len(seen))
+	for mv := range seen {
+		out = append(out, mv)
+	}
+	return out, nil
 }
 
 
@@ -114,7 +243,7 @@ func (s *GoModScanner) Support(root string) bool {
 		return true
 	case LayerArtifacts:
 		return hasFile(root, "vendor/modules.txt") || hasFile(root, "go.sum")
-	case LayerGolist:
+	case LayerGoList:
 		// need support to run go
 		return true
 	default:
@@ -127,7 +256,6 @@ func hasFile(dir, name string) bool {
 
 	return !os.IsNotExist(err)
 }
-
 
 func check(e error) {
 	if e != nil {
