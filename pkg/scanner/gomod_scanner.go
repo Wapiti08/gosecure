@@ -39,10 +39,25 @@ type GoModScanner struct {
 
 
 func (s *GoModScanner) Scan(ctx context.Context, root string) ([]Vulnerability, error) {
-	_ = ctx
-	_ = root
-	// TODO: collectModules + VulnChecker.Check with concurrency
-	return nil, fmt.Errorf("GoModScanner.Scan: not implemented")
+	/*
+	parse go.mod, use gorountine, calls Vulns.Check
+	*/
+
+	var all []Vulnerability
+
+	// call different parsing logic
+	mods, err := s.collectModules(ctx, root)
+
+	check(err)
+
+	for _, mod := range mods  {
+		// match cve information
+		vuls, err := s.Vulns.Check(ctx, mod.Path, mod.Version)
+		check(err)
+		all = append(all, vuls...)
+	}
+
+	return all, nil
 }
 
 // three-layer data sources - one collection module
@@ -106,6 +121,7 @@ type goListModuleJSON struct {
 func collectFromGoList(ctx context.Context, root string) ([]module.Version, error) {
 	cmd := exec.CommandContext(ctx, "go", "list", "-m", "-json", "all")
 	cmd.Dir = root
+
 	var stderr bytes.Buffer
 	cmd.Stderr = &stderr
 
@@ -115,6 +131,7 @@ func collectFromGoList(ctx context.Context, root string) ([]module.Version, erro
 	}
 
 	seen := make(map[module.Version]struct{})
+	// desired output is multiple json-format files
 	dec := json.NewDecoder(bytes.NewReader(out))
 	// try to read from steaming continously
 	for {
