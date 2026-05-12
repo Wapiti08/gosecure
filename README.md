@@ -33,6 +33,19 @@ A golang-based high-performance dependency scanning tool
 
 - `pkg/risk/`: pure scoring and policy (package age, popularity proxies, maintainer signals, post-install script flags); consumed by CLI or diff reports.
 
+## Related tools (for comparison)
+
+These are mature open-source projects in the same problem space (dependency + vulnerability intelligence). Use them as benchmarks for features, accuracy, and UX—not as endorsements.
+
+- **[govulncheck](https://pkg.go.dev/golang.org/x/vuln/cmd/govulncheck)** — official Go vulnerability scanner (call-graph aware for Go code paths).
+- **[OSV-Scanner](https://github.com/google/osv-scanner)** — multi-ecosystem scanner built around the [OSV](https://ossf.github.io/osv-schema/) model.
+- **[Grype](https://github.com/anchore/grype)** — vulnerability matcher; often paired with **[Syft](https://github.com/anchore/syft)** (SBOM generation).
+- **[Trivy](https://github.com/aquasecurity/trivy)** — broad security scanner (containers, IaC, language deps, etc.).
+- **[OWASP Dependency-Check](https://github.com/jeremylong/DependencyCheck)** — dependency analysis with multiple advisory sources.
+- **Ecosystem-native CLIs (for cross-language comparisons)**  
+  - **[npm audit](https://docs.npmjs.com/cli/v10/commands/npm-audit)** (Node.js)  
+  - **[cargo audit](https://github.com/RustSec/cargo-audit)** (Rust)
+
 ## Initialization
 ```
 go mod init github.com/Wapiti08/gosecure
