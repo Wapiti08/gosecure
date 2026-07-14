@@ -1,54 +1,108 @@
 # gosecure
-A golang-based high-performance dependency scanning tool
 
+`gosecure` is an experimental security analysis tool for explaining security-sensitive behavior changes between Go package releases.
 
-## Core Features
-- extreme-speed scanning (compared with govulncheck)
-- golang-based, extensible
-- deep transitive dependency scanning (depth configurable), catching vulnerabilities hidden in nested deps
-- plugin-support, multi-language support
-- dependency diff & risk scoring: compare two lockfiles or releases, flag newly introduced packages, score by age, popularity, maintainer signals, and install scripts (mitigates axios-style supply-chain risk).
+Instead of building another general-purpose dependency vulnerability scanner, gosecure focuses on a different question:
 
-## Structure
+> What new security-relevant behavior does this package version introduce?
 
-- `cmd/gosecure/`: CLI entrypoint (flags, subcommands, wiring into scanners and diff/risk flows).
+The goal is to help maintainers review dependency upgrades and detect suspicious changes before they are classified as a known vulnerability or malicious package.
 
-- `internal/config/`: shared CLI/runtime configuration (loaded by `cmd`).
+## Project status
 
-- `pkg/scanner/`: dependency discovery and per-ecosystem scanners.
+gosecure is in an early design and development stage. The repository currently contains foundations for Go module discovery, vulnerability lookup, dependency graphs, version diffs, and risk signals. The behavior-analysis workflow described below is the intended direction and is not yet fully implemented.
 
-    - `scanner.go`: `Scanner` / `VulnChecker` interfaces, `Vulnerability`, helpers such as `ScanProject`.
+## Expected features
 
-    - `gomod_scanner.go`: Go modules (`go.mod` layers: modfile / artifacts / `go list`, configurable transitive depth where applicable).
+### Release behavior diff
 
-    - `concurrent.go`: reserved for shared concurrency helpers used by scanners (optional).
+Compare two versions of a Go module and report newly introduced security-sensitive behavior, including:
 
-    - `scanner_test.go`: unit tests for the scanner package.
+- process and shell execution;
+- outbound network access and newly referenced domains;
+- reads of credentials, environment variables, home directories, or other sensitive files;
+- use of CGO, `unsafe`, reflection, or embedded executables;
+- changes to `go:generate`, build scripts, and platform-specific files;
+- added binary assets, generated code, or heavily obfuscated source.
 
-- `pkg/vuln/`: vulnerability backends and wrappers (`VulnChecker` implementations: OSV, NVD, caching, rate limiting, etc.).
+### Reachability and evidence
 
-- `pkg/graph/`: dependency graph representation and algorithms (depth limits, visualization, shared by scanners and reports).
+- Build call graphs to distinguish reachable behavior from unused code.
+- Show the source location and call path for each finding.
+- Explain what changed between releases instead of returning only an opaque risk score.
+- Account for build tags, target operating systems, and architectures where possible.
 
-- `pkg/diff/`: compare two dependency snapshots (e.g. two lockfiles or two resolved graphs); output added/removed/changed packages.
+### Source and release provenance
 
-- `pkg/risk/`: pure scoring and policy (package age, popularity proxies, maintainer signals, post-install script flags); consumed by CLI or diff reports.
+- Compare Git tags, module proxy source archives, and repository contents.
+- Highlight source files or artifacts that exist in a release but not in the expected revision.
+- Detect repository, module path, or maintainer ownership changes.
+- Surface unusual release timing or version-history anomalies as supporting evidence.
 
-## Related tools (for comparison)
+### Policy and automation
 
-These are mature open-source projects in the same problem space (dependency + vulnerability intelligence). Use them as benchmarks for features, accuracy, and UX—not as endorsements.
+- Produce `allow`, `warn`, or `block` decisions from configurable policies.
+- Support human-readable, JSON, and SARIF reports.
+- Run locally or in CI without requiring a specific source-hosting platform.
+- Allow known or reviewed behavior to be suppressed with an auditable justification.
 
-- **[govulncheck](https://pkg.go.dev/golang.org/x/vuln/cmd/govulncheck)** — official Go vulnerability scanner (call-graph aware for Go code paths).
-- **[OSV-Scanner](https://github.com/google/osv-scanner)** — multi-ecosystem scanner built around the [OSV](https://ossf.github.io/osv-schema/) model.
-- **[Grype](https://github.com/anchore/grype)** — vulnerability matcher; often paired with **[Syft](https://github.com/anchore/syft)** (SBOM generation).
-- **[Trivy](https://github.com/aquasecurity/trivy)** — broad security scanner (containers, IaC, language deps, etc.).
-- **[OWASP Dependency-Check](https://github.com/jeremylong/DependencyCheck)** — dependency analysis with multiple advisory sources.
-- **Ecosystem-native CLIs (for cross-language comparisons)**  
-  - **[npm audit](https://docs.npmjs.com/cli/v10/commands/npm-audit)** (Node.js)  
-  - **[cargo audit](https://github.com/RustSec/cargo-audit)** (Rust)
+## Example report
 
-## Initialization
+The intended output will look similar to:
+
+```text
+example.com/module v1.4.2 -> v1.4.3
+
+HIGH    introduced process execution via os/exec.Command
+        internal/update/install.go:48
+        reachable from update.Apply
+
+MEDIUM  introduced outbound connection to telemetry.example.com
+        internal/client/report.go:27
+
+INFO    repository ownership changed before this release
+
+Decision: manual review required
 ```
-go mod init github.com/Wapiti08/gosecure
-go install github.com/spf13/cobra-cli@latest
-go mod tidy
+
+## Scope
+
+The initial scope is deliberately Go-specific. Multi-ecosystem dependency discovery and known-CVE matching are not primary product goals: GitHub Dependency Review, Dependabot, OSV-Scanner, Trivy, Grype, and other mature tools already cover those use cases well.
+
+Known vulnerability data may still be included as supporting context, but gosecure's main value should come from behavioral and provenance evidence that is not dependent on an existing advisory.
+
+## Current repository structure
+
+- `cmd/gosecure/`: CLI entrypoint and future command wiring.
+- `internal/config/`: shared runtime configuration.
+- `pkg/scanner/`: current Go module dependency discovery.
+- `pkg/vuln/`: current vulnerability backends and caching.
+- `pkg/graph/`: dependency graph representation and algorithms.
+- `pkg/diff/`: dependency snapshot and version comparison foundations.
+- `pkg/risk/`: current risk signals and policy foundations.
+
+As the new direction is implemented, the planned core components are:
+
+- `pkg/source/`: acquire and normalize two package releases.
+- `pkg/behavior/`: identify security-sensitive capabilities and API usage.
+- `pkg/callgraph/`: calculate reachability and evidence paths.
+- `pkg/diff/`: compare behavior, source, and artifacts between releases.
+- `pkg/provenance/`: verify source and release consistency.
+- `pkg/policy/`: turn findings into configurable decisions.
+- `pkg/report/`: render terminal, JSON, and SARIF output.
+
+## Non-goals
+
+- Replacing Dependabot or GitHub Dependency Review.
+- Becoming a universal lockfile or container vulnerability scanner.
+- Competing on the number of supported package ecosystems.
+- Treating a single unexplained numeric risk score as a security verdict.
+
+## Development
+
+```bash
+go mod download
+go test ./...
 ```
+
+The CLI is not yet ready for general use.
